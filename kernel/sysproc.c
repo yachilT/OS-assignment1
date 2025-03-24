@@ -11,7 +11,11 @@ sys_exit(void)
 {
   int n;
   argint(0, &n);
-  exit(n);
+  int len;
+  char msg[32];
+  argstr(1, msg, &len);
+
+  exit(n, msg);
   return 0;  // not reached
 }
 
@@ -32,7 +36,10 @@ sys_wait(void)
 {
   uint64 p;
   argaddr(0, &p);
-  return wait(p);
+  uint64 buf;
+  argaddr(1, &buf);
+
+  return wait(p, buf);
 }
 
 uint64
@@ -89,3 +96,5 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
