@@ -11,9 +11,8 @@ sys_exit(void)
 {
   int n;
   argint(0, &n);
-  int len;
   char msg[32];
-  argstr(1, msg, &len);
+  argstr(1, msg, 32);
 
   exit(n, msg);
   return 0;  // not reached
@@ -32,6 +31,17 @@ sys_fork(void)
 }
 
 uint64
+sys_forkn(void)
+{
+  int n;
+  argint(0, &n);
+  uint64 pids;
+  argaddr(0, &pids);
+
+  //int k_pids[n];
+  return forkn(n, pids);
+}
+uint64
 sys_wait(void)
 {
   uint64 p;
@@ -42,6 +52,16 @@ sys_wait(void)
   return wait(p, buf);
 }
 
+uint64
+sys_waitall(void)
+{
+  uint64 n;
+  argaddr(0, &n);
+
+  uint64 statuses;
+  argaddr(1, &statuses);
+  return waitall(n, statuses);
+}
 uint64
 sys_sbrk(void)
 {

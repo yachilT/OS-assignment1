@@ -3,7 +3,7 @@ struct stat;
 // system calls
 int fork(void);
 int exit(int, const char*) __attribute__((noreturn));
-int wait(int*);
+int wait(int*, char*);
 int pipe(int*);
 int write(int, const void*, int);
 int read(int, void*, int);
@@ -23,6 +23,8 @@ char* sbrk(int);
 int sleep(int);
 int uptime(void);
 int memsize(void);
+int forkn(int, int*);
+int waitall(int*, int*);
 
 // ulib.c
 int stat(const char*, struct stat*);

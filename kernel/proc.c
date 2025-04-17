@@ -6,6 +6,7 @@
 #include "proc.h"
 #include "defs.h"
 
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
@@ -325,13 +326,81 @@ fork(void)
   return pid;
 }
 
+// assignment 1 task 4
+int
+forkn(int n, uint64 pids) {
+  struct proc *nps[n];
+  struct proc *p = myproc();
+  int i = 0;
+  int failed = 0; 
+  int local_pids[n];
+
+  while(i < n){
+      // Allocate process.
+    if((nps[i] = allocproc()) == 0){
+      break;
+    }
+    i++;
+    // Copy user memory from parent to child.
+    if(uvmcopy(p->pagetable, nps[i-1]->pagetable, p->sz) < 0){
+      failed = 1;
+      break;
+
+    }
+
+    nps[i-1]->sz = p->sz;
+
+    // copy saved user registers.
+    *(nps[i-1]->trapframe) = *(p->trapframe);
+
+    // Cause fork to return index+1 of the child.
+    nps[i-1]->trapframe->a0 = i; 
+
+    // increment reference counts on open file descriptors.
+    for(int j = 0; j < NOFILE; j++)
+      if(p->ofile[j])
+        nps[i-1]->ofile[j] = filedup(p->ofile[j]);
+    nps[i-1]->cwd = idup(p->cwd);
+
+    safestrcpy(nps[i-1]->name, p->name, sizeof(p->name));
+
+    local_pids[i-1] = nps[i-1]->pid;
+
+    release(&nps[i-1]->lock);
+    acquire(&wait_lock);
+    nps[i-1]->parent = p;
+    release(&wait_lock);
+  }
+
+
+  if (i < n || failed || (pids != 0 && copyout(p->pagetable, pids, (char*)local_pids, sizeof(local_pids)) < 0)) {
+    for (int j = 0; j < i; j++) {
+      acquire(&nps[j]->lock);
+      freeproc(nps[j]);
+      release(&nps[j]->lock);
+    }
+    return -1;
+  }
+
+
+  // created all proccess, can make them runnable
+  for (int i = 0; i < n; i++) {
+
+    
+    acquire(&nps[i]->lock);
+    nps[i]->state = RUNNABLE;
+    release(&nps[i]->lock);
+  }
+  return 0;
+}
+
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
 reparent(struct proc *p)
 {
   struct proc *pp;
-
+  
   for(pp = proc; pp < &proc[NPROC]; pp++){
     if(pp->parent == p){
       pp->parent = initproc;
@@ -350,7 +419,9 @@ exit(int status, char* msg)
   if(p == initproc)
     panic("init exiting");
   
-    strncpy(p->exit_msg, msg, strlen(msg));
+  if (msg != 0) {
+    strncpy(p->exit_msg, msg, 32);
+  }
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){
     if(p->ofile[fd]){
@@ -414,7 +485,9 @@ wait(uint64 addr, uint64 buf)
             release(&wait_lock);
             return -1;
           }
-          copyout(p->pagetable, buf, pp->exit_msg, strlen(pp->exit_msg));
+          if (buf != 0x0){
+            copyout(p->pagetable, buf, pp->exit_msg, 32);
+          }
           freeproc(pp);
           release(&pp->lock);
           release(&wait_lock);
@@ -433,6 +506,72 @@ wait(uint64 addr, uint64 buf)
     // Wait for a child to exit.
     sleep(p, &wait_lock);  //DOC: wait-sleep
   }
+}
+
+
+int
+waitall(uint64 n, uint64 statuses) 
+{
+  int num_kids = 0;
+  int num_exited = 0;
+  int havekids = 0;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for(struct proc *pp = proc; pp < &proc[NPROC]; pp++) {
+    if (pp->parent == p){
+      num_kids++;
+    }
+  }
+
+  for(;;){
+    // Scan through table looking for exited children.
+    for(int i = 0; i < NPROC; i++){
+      if(proc[i].parent == p){
+        // make sure the child isn't still in exit() or swtch().
+        acquire(&proc[i].lock);
+
+        havekids = 1;
+        if(proc[i].state == ZOMBIE){
+          // Found one.
+          
+
+          //copy exit status
+          if(statuses != 0 && copyout(p->pagetable, statuses + num_exited * sizeof(proc[i].pid), (char *)&proc[i].xstate,
+                                  sizeof(proc[i].xstate)) < 0) {
+            release(&proc[i].lock);
+            release(&wait_lock);
+            return -1;
+          }
+          
+          freeproc(&proc[i]);
+          release(&proc[i].lock);
+          num_exited++;
+          
+          if (num_kids == num_exited) {
+            release(&wait_lock);
+            if (n != 0 && copyout(p->pagetable, n, (char*)&num_exited, sizeof(num_exited)) < 0) {
+              return -1;
+            }
+            return 0;
+          }
+        }
+        else {
+          release(&proc[i].lock);
+        }
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || killed(p)){
+      release(&wait_lock);
+      return -1;
+    }
+    
+    // Wait for a child to exit.
+    sleep(p, &wait_lock);  //DOC: wait-sleep
+  } 
 }
 
 // Per-CPU process scheduler.
